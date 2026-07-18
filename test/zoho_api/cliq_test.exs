@@ -324,7 +324,7 @@ defmodule ZohoAPI.CliqTest do
   describe "list_all_teams/0" do
     test "collects teams from a single page when next_token is absent" do
       expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
-        assert url =~ "teams"
+        assert url =~ "/teams"
         refute url =~ "next_token"
 
         {:ok,

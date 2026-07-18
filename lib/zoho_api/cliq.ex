@@ -221,9 +221,10 @@ defmodule ZohoAPI.Cliq do
       the first page.
 
   ## Returns
-    `{:ok, %{teams: [map()], next_token: String.t() | nil}}` on success. Each
-    team map carries `"team_id"` (string), `"name"`, `"is_active"`,
-    `"is_team_channel_creation_allowed"`, `"is_member"`.
+    `{:ok, %{teams: [map()], next_token: String.t() | nil}}` on success. Callers
+    building a team-channel picker rely on `"team_id"` (string), `"name"`, and
+    `"is_team_channel_creation_allowed"`; the raw team map may carry additional
+    Zoho fields not enumerated here.
   """
   @spec list_teams(String.t() | nil) ::
           {:ok, %{teams: [map()], next_token: String.t() | nil}} | {:error, any()}

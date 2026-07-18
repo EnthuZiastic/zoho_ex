@@ -207,6 +207,61 @@ defmodule ZohoAPI.Cliq do
   def list_all_users(), do: collect_pages(&list_users/1, :users)
 
   # ---------------------------------------------------------------------------
+  # Team read methods
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Lists a single page of Cliq teams.
+
+  Teams are the org units backing `level: "team"` channels — a team channel's
+  `team_ids` reference these `team_id` values.
+
+  ## Parameters
+    - `next_token` - Pagination token from a previous response, or `nil` for
+      the first page.
+
+  ## Returns
+    `{:ok, %{teams: [map()], next_token: String.t() | nil}}` on success. Each
+    team map carries `"team_id"` (string), `"name"`, `"is_active"`,
+    `"is_team_channel_creation_allowed"`, `"is_member"`.
+  """
+  @spec list_teams(String.t() | nil) ::
+          {:ok, %{teams: [map()], next_token: String.t() | nil}} | {:error, any()}
+  def list_teams(next_token \\ nil) do
+    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+      req =
+        Request.new("cliq")
+        |> Request.set_access_token(token)
+        |> Request.with_version(@cliq_version)
+        |> Request.with_method(:get)
+        |> Request.with_path("teams")
+
+      req =
+        if next_token,
+          do: Request.with_params(req, %{next_token: next_token}),
+          else: req
+
+      case Request.send(req) do
+        {:ok, resp} ->
+          {:ok, %{teams: resp["teams"] || [], next_token: resp["next_token"]}}
+
+        err ->
+          err
+      end
+    end
+  catch
+    :exit, {:noproc, {GenServer, :call, [ZohoAPI.TokenCache | _]}} ->
+      Logger.warning("[ZohoAPI.Cliq] TokenCache unavailable — skipping")
+      {:error, :zoho_token_cache_unavailable}
+  end
+
+  @doc """
+  Fetches all Cliq teams by following `next_token` pagination until exhausted.
+  """
+  @spec list_all_teams() :: {:ok, [map()]} | {:error, any()}
+  def list_all_teams(), do: collect_pages(&list_teams/1, :teams)
+
+  # ---------------------------------------------------------------------------
   # Channel write methods
   # ---------------------------------------------------------------------------
 

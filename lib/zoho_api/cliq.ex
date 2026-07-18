@@ -425,16 +425,20 @@ defmodule ZohoAPI.Cliq do
     do_collect_pages(fetch_fn, nil, [], key)
   end
 
+  # `acc` accumulates one list per page in reverse page order so each step is
+  # O(1); the pages are flattened back into request order once at the terminal
+  # case. Avoids the O(n²) blowup of `acc ++ items` on many-page responses.
   defp do_collect_pages(fetch_fn, token, acc, key) do
     case fetch_fn.(token) do
       {:ok, resp} ->
         items = Map.get(resp, key, [])
         next = Map.get(resp, :next_token)
+        acc = [items | acc]
 
         if next && next != "" do
-          do_collect_pages(fetch_fn, next, acc ++ items, key)
+          do_collect_pages(fetch_fn, next, acc, key)
         else
-          {:ok, acc ++ items}
+          {:ok, acc |> Enum.reverse() |> Enum.concat()}
         end
 
       {:error, _} = err ->

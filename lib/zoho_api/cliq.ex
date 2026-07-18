@@ -95,7 +95,7 @@ defmodule ZohoAPI.Cliq do
     `{:ok, [map()]}` containing the full list across all pages.
   """
   @spec list_all_channels() :: {:ok, [map()]} | {:error, any()}
-  def list_all_channels(), do: collect_pages(&list_channels/1, :channels)
+  def list_all_channels, do: collect_pages(&list_channels/1, :channels)
 
   @doc """
   Fetches a single channel by its numeric ID string.
@@ -204,7 +204,7 @@ defmodule ZohoAPI.Cliq do
   Fetches all Cliq users by following `next_token` pagination until exhausted.
   """
   @spec list_all_users() :: {:ok, [map()]} | {:error, any()}
-  def list_all_users(), do: collect_pages(&list_users/1, :users)
+  def list_all_users, do: collect_pages(&list_users/1, :users)
 
   # ---------------------------------------------------------------------------
   # Team read methods
@@ -259,7 +259,7 @@ defmodule ZohoAPI.Cliq do
   Fetches all Cliq teams by following `next_token` pagination until exhausted.
   """
   @spec list_all_teams() :: {:ok, [map()]} | {:error, any()}
-  def list_all_teams(), do: collect_pages(&list_teams/1, :teams)
+  def list_all_teams, do: collect_pages(&list_teams/1, :teams)
 
   # ---------------------------------------------------------------------------
   # Channel write methods

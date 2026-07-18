@@ -316,4 +316,70 @@ defmodule ZohoAPI.CliqTest do
       assert length(users) == 3
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # list_all_teams/0
+  # ---------------------------------------------------------------------------
+
+  describe "list_all_teams/0" do
+    test "collects teams from a single page when next_token is absent" do
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
+        assert url =~ "/teams"
+        refute url =~ "next_token"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body:
+             Jason.encode!(%{
+               "teams" => [
+                 %{"team_id" => "60012343427", "name" => "Operations"},
+                 %{"team_id" => "60012343999", "name" => "Sales"}
+               ]
+             })
+         }}
+      end)
+
+      assert {:ok, teams} = Cliq.list_all_teams()
+      assert length(teams) == 2
+      assert Enum.any?(teams, &(&1["team_id"] == "60012343427"))
+    end
+
+    test "follows next_token across multiple pages until exhausted" do
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
+        refute url =~ "next_token"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body:
+             Jason.encode!(%{
+               "teams" => [%{"team_id" => "t1"}],
+               "next_token" => "teampage2"
+             })
+         }}
+      end)
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
+        assert url =~ "next_token=teampage2"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: Jason.encode!(%{"teams" => [%{"team_id" => "t2"}]})
+         }}
+      end)
+
+      assert {:ok, teams} = Cliq.list_all_teams()
+      assert Enum.map(teams, & &1["team_id"]) == ["t1", "t2"]
+    end
+
+    test "returns error immediately if a page fetch fails" do
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, _url, _body, _headers, _opts ->
+        {:ok, %Req.Response{status: 500, body: Jason.encode!(%{"message" => "server error"})}}
+      end)
+
+      assert {:error, _} = Cliq.list_all_teams()
+    end
+  end
 end

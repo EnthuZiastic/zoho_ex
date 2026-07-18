@@ -95,7 +95,7 @@ defmodule ZohoAPI.Cliq do
     `{:ok, [map()]}` containing the full list across all pages.
   """
   @spec list_all_channels() :: {:ok, [map()]} | {:error, any()}
-  def list_all_channels(), do: collect_pages(&list_channels/1, :channels)
+  def list_all_channels, do: collect_pages(&list_channels/1, :channels)
 
   @doc """
   Fetches a single channel by its numeric ID string.
@@ -204,7 +204,63 @@ defmodule ZohoAPI.Cliq do
   Fetches all Cliq users by following `next_token` pagination until exhausted.
   """
   @spec list_all_users() :: {:ok, [map()]} | {:error, any()}
-  def list_all_users(), do: collect_pages(&list_users/1, :users)
+  def list_all_users, do: collect_pages(&list_users/1, :users)
+
+  # ---------------------------------------------------------------------------
+  # Team read methods
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Lists a single page of Cliq teams.
+
+  Teams are the org units backing `level: "team"` channels — a team channel's
+  `team_ids` reference these `team_id` values.
+
+  ## Parameters
+    - `next_token` - Pagination token from a previous response, or `nil` for
+      the first page.
+
+  ## Returns
+    `{:ok, %{teams: [map()], next_token: String.t() | nil}}` on success. Callers
+    building a team-channel picker rely on `"team_id"` (string), `"name"`, and
+    `"is_team_channel_creation_allowed"`; the raw team map may carry additional
+    Zoho fields not enumerated here.
+  """
+  @spec list_teams(String.t() | nil) ::
+          {:ok, %{teams: [map()], next_token: String.t() | nil}} | {:error, any()}
+  def list_teams(next_token \\ nil) do
+    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+      req =
+        Request.new("cliq")
+        |> Request.set_access_token(token)
+        |> Request.with_version(@cliq_version)
+        |> Request.with_method(:get)
+        |> Request.with_path("teams")
+
+      req =
+        if next_token,
+          do: Request.with_params(req, %{next_token: next_token}),
+          else: req
+
+      case Request.send(req) do
+        {:ok, resp} ->
+          {:ok, %{teams: resp["teams"] || [], next_token: resp["next_token"]}}
+
+        err ->
+          err
+      end
+    end
+  catch
+    :exit, {:noproc, {GenServer, :call, [ZohoAPI.TokenCache | _]}} ->
+      Logger.warning("[ZohoAPI.Cliq] TokenCache unavailable — skipping")
+      {:error, :zoho_token_cache_unavailable}
+  end
+
+  @doc """
+  Fetches all Cliq teams by following `next_token` pagination until exhausted.
+  """
+  @spec list_all_teams() :: {:ok, [map()]} | {:error, any()}
+  def list_all_teams, do: collect_pages(&list_teams/1, :teams)
 
   # ---------------------------------------------------------------------------
   # Channel write methods
@@ -369,16 +425,20 @@ defmodule ZohoAPI.Cliq do
     do_collect_pages(fetch_fn, nil, [], key)
   end
 
+  # `acc` accumulates one list per page in reverse page order so each step is
+  # O(1); the pages are flattened back into request order once at the terminal
+  # case. Avoids the O(n²) blowup of `acc ++ items` on many-page responses.
   defp do_collect_pages(fetch_fn, token, acc, key) do
     case fetch_fn.(token) do
       {:ok, resp} ->
         items = Map.get(resp, key, [])
         next = Map.get(resp, :next_token)
+        acc = [items | acc]
 
         if next && next != "" do
-          do_collect_pages(fetch_fn, next, acc ++ items, key)
+          do_collect_pages(fetch_fn, next, acc, key)
         else
-          {:ok, acc ++ items}
+          {:ok, acc |> Enum.reverse() |> Enum.concat()}
         end
 
       {:error, _} = err ->

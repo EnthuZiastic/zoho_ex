@@ -433,27 +433,32 @@ defmodule ZohoAPI.Cliq do
       are accepted; all other keys (including `level` and `user_ids`) are
       ignored. Membership is managed via `add_channel_members/2` and
       `remove_channel_members/2`, not here. Keys may be atoms or strings —
-      both forms are normalized. An `attrs` map with no accepted keys yields
-      an empty body; Zoho rejects an empty update, so callers should pass at
-      least one of `name`/`description`.
+      both forms are normalized. If `attrs` carries none of the accepted keys
+      the body would be empty, so this returns `{:error, :no_updatable_fields}`
+      without calling the API (Zoho rejects an empty update).
 
   Doc: https://www.zoho.com/cliq/help/restapi/v2/channels/ ("Update a channel").
   """
-  @spec update_channel(String.t(), map()) :: {:ok, map()} | {:error, any()}
+  @spec update_channel(String.t(), map()) ::
+          {:ok, map()} | {:error, :no_updatable_fields | any()}
   def update_channel(channel_id, attrs) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
-      body =
-        attrs
-        |> Map.new(fn {k, v} -> {to_string(k), v} end)
-        |> Map.take(["name", "description"])
+    body =
+      attrs
+      |> Map.new(fn {k, v} -> {to_string(k), v} end)
+      |> Map.take(["name", "description"])
 
-      Request.new("cliq")
-      |> Request.set_access_token(token)
-      |> Request.with_version(@cliq_version)
-      |> Request.with_method(:put)
-      |> Request.with_path("channels/#{channel_id}")
-      |> Request.with_body(body)
-      |> Request.send()
+    if body == %{} do
+      {:error, :no_updatable_fields}
+    else
+      with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+        Request.new("cliq")
+        |> Request.set_access_token(token)
+        |> Request.with_version(@cliq_version)
+        |> Request.with_method(:put)
+        |> Request.with_path("channels/#{channel_id}")
+        |> Request.with_body(body)
+        |> Request.send()
+      end
     end
   catch
     :exit, {:noproc, {GenServer, :call, [ZohoAPI.TokenCache | _]}} ->

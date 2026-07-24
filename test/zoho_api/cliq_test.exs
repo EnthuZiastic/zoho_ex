@@ -320,6 +320,16 @@ defmodule ZohoAPI.CliqTest do
 
       assert {:ok, _} = Cliq.update_channel(channel_id, attrs)
     end
+
+    test "returns :no_updatable_fields and makes no request when no accepted keys" do
+      # No expect/1 is set — verify_on_exit! asserts the HTTP client is never
+      # called, proving the guard short-circuits before hitting the API.
+      assert {:error, :no_updatable_fields} =
+               Cliq.update_channel("987000000654321", %{level: "organization", foo: "bar"})
+
+      assert {:error, :no_updatable_fields} =
+               Cliq.update_channel("987000000654321", %{})
+    end
   end
 
   # ---------------------------------------------------------------------------

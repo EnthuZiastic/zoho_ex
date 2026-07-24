@@ -429,17 +429,23 @@ defmodule ZohoAPI.Cliq do
 
   ## Parameters
     - `channel_id` - The numeric channel ID string.
-    - `attrs` - Map of attributes to update. Only `:name` and `:description`
-      are accepted; all other keys (including `:level` and `:user_ids`) are
+    - `attrs` - Map of attributes to update. Only `name` and `description`
+      are accepted; all other keys (including `level` and `user_ids`) are
       ignored. Membership is managed via `add_channel_members/2` and
-      `remove_channel_members/2`, not here.
+      `remove_channel_members/2`, not here. Keys may be atoms or strings —
+      both forms are normalized. An `attrs` map with no accepted keys yields
+      an empty body; Zoho rejects an empty update, so callers should pass at
+      least one of `name`/`description`.
 
   Doc: https://www.zoho.com/cliq/help/restapi/v2/channels/ ("Update a channel").
   """
   @spec update_channel(String.t(), map()) :: {:ok, map()} | {:error, any()}
   def update_channel(channel_id, attrs) do
     with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
-      body = Map.take(attrs, [:name, :description])
+      body =
+        attrs
+        |> Map.new(fn {k, v} -> {to_string(k), v} end)
+        |> Map.take(["name", "description"])
 
       Request.new("cliq")
       |> Request.set_access_token(token)

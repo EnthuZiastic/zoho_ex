@@ -298,6 +298,28 @@ defmodule ZohoAPI.CliqTest do
       attrs = %{name: "engineering", level: "organization", foo: "bar", user_ids: ["u1"]}
       assert {:ok, _} = Cliq.update_channel(channel_id, attrs)
     end
+
+    test "normalizes string-keyed attrs into the body" do
+      channel_id = "987000000654321"
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :put, _url, body, _headers, _opts ->
+        decoded = Jason.decode!(body)
+        assert decoded["name"] == "engineering"
+        assert decoded["description"] == "Eng chatter"
+        refute Map.has_key?(decoded, "level")
+
+        {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"updated" => true})}}
+      end)
+
+      # String keys must not be silently dropped (would produce an empty PUT).
+      attrs = %{
+        "name" => "engineering",
+        "description" => "Eng chatter",
+        "level" => "organization"
+      }
+
+      assert {:ok, _} = Cliq.update_channel(channel_id, attrs)
+    end
   end
 
   # ---------------------------------------------------------------------------

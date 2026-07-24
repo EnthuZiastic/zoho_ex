@@ -254,6 +254,107 @@ defmodule ZohoAPI.CliqTest do
   end
 
   # ---------------------------------------------------------------------------
+  # update_channel/2
+  # ---------------------------------------------------------------------------
+
+  describe "update_channel/2" do
+    test "sends PUT to /channels/:id with only allowed keys" do
+      channel_id = "987000000654321"
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :put, url, body, _headers, _opts ->
+        assert url =~ "channels/#{channel_id}"
+        refute url =~ "/members"
+
+        decoded = Jason.decode!(body)
+        assert decoded["name"] == "engineering"
+        assert decoded["description"] == "Eng chatter"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: Jason.encode!(%{"channel_id" => channel_id, "name" => "engineering"})
+         }}
+      end)
+
+      attrs = %{name: "engineering", description: "Eng chatter"}
+      assert {:ok, resp} = Cliq.update_channel(channel_id, attrs)
+      assert resp["channel_id"] == channel_id
+    end
+
+    test "drops :level and any unknown keys from the body" do
+      channel_id = "987000000654321"
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :put, _url, body, _headers, _opts ->
+        decoded = Jason.decode!(body)
+        # Access level is immutable after create — must never be forwarded.
+        assert decoded["name"] == "engineering"
+        refute Map.has_key?(decoded, "level")
+        refute Map.has_key?(decoded, "foo")
+        refute Map.has_key?(decoded, "user_ids")
+
+        {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"updated" => true})}}
+      end)
+
+      attrs = %{name: "engineering", level: "organization", foo: "bar", user_ids: ["u1"]}
+      assert {:ok, _} = Cliq.update_channel(channel_id, attrs)
+    end
+
+    test "normalizes string-keyed attrs into the body" do
+      channel_id = "987000000654321"
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :put, _url, body, _headers, _opts ->
+        decoded = Jason.decode!(body)
+        assert decoded["name"] == "engineering"
+        assert decoded["description"] == "Eng chatter"
+        refute Map.has_key?(decoded, "level")
+
+        {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"updated" => true})}}
+      end)
+
+      # String keys must not be silently dropped (would produce an empty PUT).
+      attrs = %{
+        "name" => "engineering",
+        "description" => "Eng chatter",
+        "level" => "organization"
+      }
+
+      assert {:ok, _} = Cliq.update_channel(channel_id, attrs)
+    end
+
+    test "returns :no_updatable_fields and makes no request when no accepted keys" do
+      # No expect/1 is set — verify_on_exit! asserts the HTTP client is never
+      # called, proving the guard short-circuits before hitting the API.
+      assert {:error, :no_updatable_fields} =
+               Cliq.update_channel("987000000654321", %{level: "organization", foo: "bar"})
+
+      assert {:error, :no_updatable_fields} =
+               Cliq.update_channel("987000000654321", %{})
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # unarchive_channel/1
+  # ---------------------------------------------------------------------------
+
+  describe "unarchive_channel/1" do
+    test "sends POST to /channels/:id/unarchive" do
+      channel_id = "987000000654321"
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :post, url, _body, _headers, _opts ->
+        assert url =~ "channels/#{channel_id}/unarchive"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: Jason.encode!(%{"status" => "unarchived"})
+         }}
+      end)
+
+      assert {:ok, %{"status" => "unarchived"}} = Cliq.unarchive_channel(channel_id)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # list_all_channel_members/1
   # ---------------------------------------------------------------------------
 

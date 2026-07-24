@@ -417,6 +417,78 @@ defmodule ZohoAPI.Cliq do
       {:error, :zoho_token_cache_unavailable}
   end
 
+  @doc """
+  Updates a Cliq channel's mutable attributes.
+
+  Sends a PUT to `channels/{channel_id}`.
+
+  A channel's **access level is immutable after creation** — Cliq's update
+  endpoint has no `level` field, so a `:level` key (and any other unknown key)
+  is dropped and never forwarded. To change access level you must recreate the
+  channel.
+
+  ## Parameters
+    - `channel_id` - The numeric channel ID string.
+    - `attrs` - Map of attributes to update. Only `:name` and `:description`
+      are accepted; all other keys (including `:level` and `:user_ids`) are
+      ignored. Membership is managed via `add_channel_members/2` and
+      `remove_channel_members/2`, not here.
+
+  Doc: https://www.zoho.com/cliq/help/restapi/v2/channels/ ("Update a channel").
+  """
+  @spec update_channel(String.t(), map()) :: {:ok, map()} | {:error, any()}
+  def update_channel(channel_id, attrs) do
+    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+      body = Map.take(attrs, [:name, :description])
+
+      Request.new("cliq")
+      |> Request.set_access_token(token)
+      |> Request.with_version(@cliq_version)
+      |> Request.with_method(:put)
+      |> Request.with_path("channels/#{channel_id}")
+      |> Request.with_body(body)
+      |> Request.send()
+    end
+  catch
+    :exit, {:noproc, {GenServer, :call, [ZohoAPI.TokenCache | _]}} ->
+      Logger.warning("[ZohoAPI.Cliq] TokenCache unavailable — skipping")
+      {:error, :zoho_token_cache_unavailable}
+  end
+
+  @doc """
+  Unarchives a Cliq channel. Sends a POST with no body to
+  `channels/{channel_id}/unarchive`. Mirrors `archive_channel/1`.
+
+  ## Provenance
+  There is no published Zoho doc URL for this route. The path is inferred from:
+    - the `admin_permission.unarchive_channel: true` flag present on every
+      channel object in live Cliq API responses,
+    - the Zoho Cliq MCP exposing an `unarchive_channel` tool, and
+    - symmetry with the documented `archive_channel/1`
+      (POST `channels/{id}/archive`).
+
+  The path `POST channels/{id}/unarchive` is conventional (mirror of archive),
+  not a published/live-tested route.
+
+  ## Parameters
+    - `channel_id` - The numeric channel ID string.
+  """
+  @spec unarchive_channel(String.t()) :: {:ok, map()} | {:error, any()}
+  def unarchive_channel(channel_id) do
+    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+      Request.new("cliq")
+      |> Request.set_access_token(token)
+      |> Request.with_version(@cliq_version)
+      |> Request.with_method(:post)
+      |> Request.with_path("channels/#{channel_id}/unarchive")
+      |> Request.send()
+    end
+  catch
+    :exit, {:noproc, {GenServer, :call, [ZohoAPI.TokenCache | _]}} ->
+      Logger.warning("[ZohoAPI.Cliq] TokenCache unavailable — skipping")
+      {:error, :zoho_token_cache_unavailable}
+  end
+
   # ---------------------------------------------------------------------------
   # Private pagination helpers
   # ---------------------------------------------------------------------------

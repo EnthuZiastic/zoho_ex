@@ -179,8 +179,7 @@ defmodule ZohoAPI.CliqTest do
          }}
       end)
 
-      assert {:error, {:pagination_cap_exceeded, :channels, cap}} = Cliq.list_all_channels()
-      assert is_integer(cap)
+      assert {:error, {:pagination_cap_exceeded, :channels, 200}} = Cliq.list_all_channels()
     end
   end
 
@@ -471,7 +470,7 @@ defmodule ZohoAPI.CliqTest do
   # ---------------------------------------------------------------------------
 
   describe "list_all_users/0" do
-    test "collects users from all pages" do
+    test "falls back to the legacy \"users\" key, collecting across pages" do
       expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
         assert url =~ "/users"
 

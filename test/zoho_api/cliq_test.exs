@@ -96,6 +96,92 @@ defmodule ZohoAPI.CliqTest do
 
       assert {:error, _} = Cliq.list_all_channels()
     end
+
+    # The three tests below encode what Cliq ACTUALLY does. The two happy-path tests
+    # above model a last page that omits next_token — Cliq never does that, which is
+    # why an infinite pagination loop shipped past a green suite.
+
+    test "terminates on the empty page even though it still carries a next_token" do
+      # Page 1 — real rows, plus a token.
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, _url, _body, _headers, _opts ->
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body:
+             Jason.encode!(%{
+               "channels" => [%{"channel_id" => "111"}],
+               "next_token" => "tail_token"
+             })
+         }}
+      end)
+
+      # Page 2 — zero rows, and Cliq repeats the SAME token forever.
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
+        assert url =~ "next_token=tail_token"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: Jason.encode!(%{"channels" => [], "next_token" => "tail_token"})
+         }}
+      end)
+
+      # Exactly two calls are expected; a third would fail verify_on_exit!.
+      assert {:ok, channels} = Cliq.list_all_channels()
+      assert Enum.map(channels, & &1["channel_id"]) == ["111"]
+    end
+
+    test "keeps paging when has_more is false but rows and a token are still coming" do
+      # Cliq reports has_more=false on page 1 of a multi-page list, so it must not be
+      # used as the stop signal — doing so truncates the result to the first page.
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, _url, _body, _headers, _opts ->
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body:
+             Jason.encode!(%{
+               "channels" => [%{"channel_id" => "111"}],
+               "has_more" => false,
+               "next_token" => "p2"
+             })
+         }}
+      end)
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
+        assert url =~ "next_token=p2"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: Jason.encode!(%{"channels" => [], "has_more" => false, "next_token" => "p2"})
+         }}
+      end)
+
+      assert {:ok, channels} = Cliq.list_all_channels()
+      assert Enum.map(channels, & &1["channel_id"]) == ["111"]
+    end
+
+    test "errors rather than returning a partial list when the page cap is exceeded" do
+      # Never-empty pages with an ever-changing token: only the cap can stop this.
+      # It must NOT resolve to {:ok, partial} — callers tombstone anything absent from
+      # the returned set, so a truncated list would delete the unfetched remainder.
+      stub(ZohoAPI.HTTPClientMock, :request, fn :get, _url, _body, _headers, _opts ->
+        token = "tok_#{System.unique_integer([:positive, :monotonic])}"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body:
+             Jason.encode!(%{
+               "channels" => [%{"channel_id" => "c"}],
+               "next_token" => token
+             })
+         }}
+      end)
+
+      assert {:error, {:pagination_cap_exceeded, :channels, cap}} = Cliq.list_all_channels()
+      assert is_integer(cap)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -415,6 +501,29 @@ defmodule ZohoAPI.CliqTest do
 
       assert {:ok, users} = Cliq.list_all_users()
       assert length(users) == 3
+    end
+
+    test "reads rows from the \"data\" key that Cliq actually returns" do
+      # Live response keys are ["data", "has_more", "url"] — there is no "users" key.
+      # Reading "users" yielded [] on every call, which is indistinguishable from an
+      # empty organisation, so the user sync reported success having written nothing.
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
+        assert url =~ "/users"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body:
+             Jason.encode!(%{
+               "data" => [%{"id" => "u1"}, %{"id" => "u2"}],
+               "has_more" => false,
+               "url" => "/api/v2/users"
+             })
+         }}
+      end)
+
+      assert {:ok, users} = Cliq.list_all_users()
+      assert Enum.map(users, & &1["id"]) == ["u1", "u2"]
     end
   end
 

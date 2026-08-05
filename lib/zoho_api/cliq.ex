@@ -188,7 +188,11 @@ defmodule ZohoAPI.Cliq do
 
       case Request.send(req) do
         {:ok, resp} ->
-          {:ok, %{users: resp["users"] || [], next_token: resp["next_token"]}}
+          # `GET /users` returns its rows under "data", NOT "users" (verified against a
+          # live org: keys are ["data", "has_more", "url"]). Reading "users" alone yields
+          # [] on every call, which looks exactly like an empty organisation. "users" is
+          # kept as a fallback so a provider-side rename cannot silently re-break this.
+          {:ok, %{users: resp["data"] || resp["users"] || [], next_token: resp["next_token"]}}
 
         err ->
           err
@@ -504,28 +508,64 @@ defmodule ZohoAPI.Cliq do
   # Private pagination helpers
   # ---------------------------------------------------------------------------
 
+  # Cliq returns a `next_token` on EVERY page, including the empty page past the end —
+  # and that last token is the PREVIOUS page's token repeated verbatim. Stopping only on
+  # a nil/blank token therefore never terminates. Verified against a live org: pages 1-6
+  # returned ~50 channels each, page 7 returned the final 18, and page 8 returned 0
+  # channels carrying page 7's token, indefinitely.
+  #
+  # The response's `has_more` flag is NOT a usable stop signal either — it came back
+  # `false` on page 1 of that same 7-page list, so trusting it would truncate the result
+  # to the first page. Do not "simplify" this to `has_more`.
+  #
+  # Terminal condition is an EMPTY page. A repeated token and a hard page cap are
+  # backstops so a provider-side change can never reinstate the infinite loop.
+  @max_pages 200
+
   defp collect_pages(fetch_fn, key) do
-    do_collect_pages(fetch_fn, nil, [], key)
+    do_collect_pages(fetch_fn, nil, [], key, MapSet.new(), 1)
   end
 
   # `acc` accumulates one list per page in reverse page order so each step is
   # O(1); the pages are flattened back into request order once at the terminal
   # case. Avoids the O(n²) blowup of `acc ++ items` on many-page responses.
-  defp do_collect_pages(fetch_fn, token, acc, key) do
+  defp do_collect_pages(fetch_fn, token, acc, key, seen, page) do
     case fetch_fn.(token) do
       {:ok, resp} ->
         items = Map.get(resp, key, [])
         next = Map.get(resp, :next_token)
         acc = [items | acc]
 
-        if next && next != "" do
-          do_collect_pages(fetch_fn, next, acc, key)
-        else
-          {:ok, acc |> Enum.reverse() |> Enum.concat()}
+        cond do
+          items == [] ->
+            collected(acc)
+
+          is_nil(next) or next == "" ->
+            collected(acc)
+
+          MapSet.member?(seen, next) ->
+            collected(acc)
+
+          page >= @max_pages ->
+            # Deliberately an error, not a partial `{:ok, list}`. Callers reconcile
+            # absence against the returned set (anything missing is tombstoned), so a
+            # silently truncated list would delete every record living on the pages we
+            # never fetched. Failing loudly is the safe direction.
+            Logger.error(
+              "[ZohoAPI.Cliq] pagination for #{inspect(key)} exceeded #{@max_pages} pages — " <>
+                "refusing to return a partial list"
+            )
+
+            {:error, {:pagination_cap_exceeded, key, @max_pages}}
+
+          true ->
+            do_collect_pages(fetch_fn, next, acc, key, MapSet.put(seen, next), page + 1)
         end
 
       {:error, _} = err ->
         err
     end
   end
+
+  defp collected(acc), do: {:ok, acc |> Enum.reverse() |> Enum.concat()}
 end

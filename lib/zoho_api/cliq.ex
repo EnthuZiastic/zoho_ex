@@ -93,6 +93,11 @@ defmodule ZohoAPI.Cliq do
 
   ## Returns
     `{:ok, [map()]}` containing the full list across all pages.
+
+    `{:error, {:pagination_cap_exceeded, :channels, max}}` if pagination ran past
+    `max` pages without reaching the end. Handle this explicitly: the result is
+    NEVER a partial list, because callers that reconcile absence would tombstone
+    everything on the unfetched pages.
   """
   @spec list_all_channels() :: {:ok, [map()]} | {:error, any()}
   def list_all_channels, do: collect_pages(&list_channels/1, :channels)
@@ -158,6 +163,9 @@ defmodule ZohoAPI.Cliq do
 
   @doc """
   Fetches all members of a channel by following `next_token` pagination.
+
+  May return `{:error, {:pagination_cap_exceeded, :members, max}}` — see
+  `list_all_channels/0` for why that is an error rather than a partial list.
   """
   @spec list_all_channel_members(String.t()) :: {:ok, [map()]} | {:error, any()}
   def list_all_channel_members(channel_id) do
@@ -206,6 +214,9 @@ defmodule ZohoAPI.Cliq do
 
   @doc """
   Fetches all Cliq users by following `next_token` pagination until exhausted.
+
+  May return `{:error, {:pagination_cap_exceeded, :users, max}}` — see
+  `list_all_channels/0` for why that is an error rather than a partial list.
   """
   @spec list_all_users() :: {:ok, [map()]} | {:error, any()}
   def list_all_users, do: collect_pages(&list_users/1, :users)
@@ -262,6 +273,9 @@ defmodule ZohoAPI.Cliq do
 
   @doc """
   Fetches all Cliq teams by following `next_token` pagination until exhausted.
+
+  May return `{:error, {:pagination_cap_exceeded, :teams, max}}` — see
+  `list_all_channels/0` for why that is an error rather than a partial list.
   """
   @spec list_all_teams() :: {:ok, [map()]} | {:error, any()}
   def list_all_teams, do: collect_pages(&list_teams/1, :teams)
@@ -523,7 +537,7 @@ defmodule ZohoAPI.Cliq do
   @max_pages 200
 
   defp collect_pages(fetch_fn, key) do
-    do_collect_pages(fetch_fn, nil, [], key, MapSet.new(), 1)
+    do_collect_pages(fetch_fn, nil, [], key, [], 1)
   end
 
   # `acc` accumulates one list per page in reverse page order so each step is
@@ -534,37 +548,40 @@ defmodule ZohoAPI.Cliq do
       {:ok, resp} ->
         items = Map.get(resp, key, [])
         next = Map.get(resp, :next_token)
-        acc = [items | acc]
 
-        cond do
-          items == [] ->
-            collected(acc)
-
-          is_nil(next) or next == "" ->
-            collected(acc)
-
-          MapSet.member?(seen, next) ->
-            collected(acc)
-
-          page >= @max_pages ->
-            # Deliberately an error, not a partial `{:ok, list}`. Callers reconcile
-            # absence against the returned set (anything missing is tombstoned), so a
-            # silently truncated list would delete every record living on the pages we
-            # never fetched. Failing loudly is the safe direction.
-            Logger.error(
-              "[ZohoAPI.Cliq] pagination for #{inspect(key)} exceeded #{@max_pages} pages — " <>
-                "refusing to return a partial list"
-            )
-
-            {:error, {:pagination_cap_exceeded, key, @max_pages}}
-
-          true ->
-            do_collect_pages(fetch_fn, next, acc, key, MapSet.put(seen, next), page + 1)
-        end
+        # The tail page contributes nothing and its token is the previous page's, so it
+        # never joins the accumulator — continue_pages/6 only ever sees real rows.
+        if items == [],
+          do: collected(acc),
+          else: continue_pages(fetch_fn, next, [items | acc], key, seen, page)
 
       {:error, _} = err ->
         err
     end
+  end
+
+  # `seen` is a plain list, not a MapSet: it is bounded by @max_pages, so the linear
+  # membership check is irrelevant next to an HTTP round trip per element — and MapSet's
+  # opaque type leaks a dialyzer warning when passed between these private functions.
+  defp continue_pages(fetch_fn, next, acc, key, seen, page) do
+    cond do
+      is_nil(next) or next == "" -> collected(acc)
+      next in seen -> collected(acc)
+      page >= @max_pages -> cap_exceeded(key)
+      true -> do_collect_pages(fetch_fn, next, acc, key, [next | seen], page + 1)
+    end
+  end
+
+  # Deliberately an error, not a partial `{:ok, list}`. Callers reconcile absence against
+  # the returned set (anything missing is tombstoned), so a silently truncated list would
+  # delete every record living on the pages we never fetched. Fail loudly instead.
+  defp cap_exceeded(key) do
+    Logger.error(
+      "[ZohoAPI.Cliq] pagination for #{inspect(key)} exceeded #{@max_pages} pages — " <>
+        "refusing to return a partial list"
+    )
+
+    {:error, {:pagination_cap_exceeded, key, @max_pages}}
   end
 
   defp collected(acc), do: {:ok, acc |> Enum.reverse() |> Enum.concat()}

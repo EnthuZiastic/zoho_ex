@@ -42,15 +42,36 @@ defmodule ZohoAPI.Cliq do
   # Existing: create_message
   # ---------------------------------------------------------------------------
 
+  @doc """
+  Posts a message to a channel addressed by its UNIQUE NAME.
+
+  ## Parameters
+    - `message` - The message text.
+    - `channel_unique_name` - The channel's `unique_name`, **not** its display name.
+
+  The distinction matters and is easy to get wrong. A Cliq channel object carries
+  both: `name` is the human display name (`"#Team Updates"` — `#`-prefixed, and
+  freely contains spaces and punctuation), while `unique_name` is a URL-friendly
+  slug fixed at creation (`"marketing"`). Zoho's glossary defines the
+  `channelsbyname/{...}` route as taking the latter.
+
+  This is why `validate_id/1` — which accepts only `^[\\w\\-]+$` — is the correct
+  guard here rather than an overly strict one: a slug satisfies it by construction.
+  Passing a display name would be rejected locally, and relaxing the regex to admit
+  one would only defer the failure to Cliq, which would match no channel.
+
+  Address a channel by its numeric `channel_id` (every other function in this module)
+  when you have one; reach for this only when a unique name is all you hold.
+  """
   @spec create_message(String.t(), String.t()) :: {:ok, map()} | {:error, any()}
-  def create_message(message, channel_name) do
-    with :ok <- Validation.validate_id(channel_name),
+  def create_message(message, channel_unique_name) do
+    with :ok <- Validation.validate_id(channel_unique_name),
          {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
       |> Request.set_access_token(token)
       |> Request.with_version(@cliq_version)
       |> Request.with_method(:post)
-      |> Request.with_path("channelsbyname/#{channel_name}/message")
+      |> Request.with_path("channelsbyname/#{channel_unique_name}/message")
       |> Request.with_body(%{text: message})
       |> Request.send()
     end

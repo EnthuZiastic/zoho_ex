@@ -347,6 +347,76 @@ defmodule ZohoAPI.CliqTest do
   end
 
   # ---------------------------------------------------------------------------
+  # channel_id validation on every other interpolated path
+  # ---------------------------------------------------------------------------
+
+  describe "channel_id validation across the remaining paths" do
+    # Every call below interpolates channel_id straight into the request path.
+    # No `expect` on the mock in any of these tests, so a call that escapes
+    # validation and reaches the HTTP client fails the test rather than passing
+    # quietly. Grouped one test per bad id (rather than per function) because the
+    # assertion is identical for all of them and the id is what varies.
+    for {label, bad_id} <- [
+          {"path traversal", "../../admin"},
+          {"path separator", "123/members"},
+          {"backslash", "123\\members"},
+          {"empty", ""}
+        ] do
+      test "rejects #{label} on every function that interpolates channel_id" do
+        bad = unquote(bad_id)
+
+        assert {:error, _} = Cliq.get_channel(bad)
+        assert {:error, _} = Cliq.list_channel_members(bad)
+        assert {:error, _} = Cliq.delete_channel(bad)
+        assert {:error, _} = Cliq.archive_channel(bad)
+        assert {:error, _} = Cliq.unarchive_channel(bad)
+        assert {:error, _} = Cliq.remove_channel_members(bad, ["u1"])
+        assert {:error, _} = Cliq.update_member_role(bad, "u1", "member")
+
+        # A non-empty attrs map is required: update_channel/2 short-circuits on
+        # :no_updatable_fields BEFORE validating the id, so an empty map would
+        # return an error for the wrong reason and assert nothing about the guard.
+        assert {:error, _} = Cliq.update_channel(bad, %{name: "x"})
+      end
+
+      test "rejects #{label} in the user_id of update_member_role/3" do
+        # user_id is the only non-channel id interpolated anywhere in the module,
+        # and it is validated separately from channel_id.
+        assert {:error, _} = Cliq.update_member_role("987000000654321", unquote(bad_id), "member")
+      end
+    end
+
+    test "update_channel/2 still reports :no_updatable_fields ahead of the id check" do
+      # Pins the ordering the test above depends on.
+      assert {:error, :no_updatable_fields} = Cliq.update_channel("../../admin", %{})
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # get_channel/1
+  # ---------------------------------------------------------------------------
+
+  describe "get_channel/1" do
+    test "sends GET to /channels/:id for a valid id" do
+      # Positive control for the validation block above: proves the guard admits
+      # a well-formed id rather than rejecting everything.
+      channel_id = "987000000654321"
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :get, url, _body, _headers, _opts ->
+        assert url =~ "channels/#{channel_id}"
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: Jason.encode!(%{"channel_id" => channel_id, "name" => "general"})
+         }}
+      end)
+
+      assert {:ok, %{"channel_id" => ^channel_id}} = Cliq.get_channel(channel_id)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # remove_channel_members/2
   # ---------------------------------------------------------------------------
 

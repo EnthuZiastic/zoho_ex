@@ -123,7 +123,8 @@ defmodule ZohoAPI.Cliq do
   """
   @spec get_channel(String.t()) :: {:ok, map()} | {:error, any()}
   def get_channel(channel_id) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+    with :ok <- Validation.validate_id(channel_id),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
       |> Request.set_access_token(token)
       |> Request.with_version(@cliq_version)
@@ -147,7 +148,8 @@ defmodule ZohoAPI.Cliq do
   @spec list_channel_members(String.t(), String.t() | nil) ::
           {:ok, %{members: [map()], next_token: String.t() | nil}} | {:error, any()}
   def list_channel_members(channel_id, next_token \\ nil) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+    with :ok <- Validation.validate_id(channel_id),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       req =
         Request.new("cliq")
         |> Request.set_access_token(token)
@@ -333,7 +335,8 @@ defmodule ZohoAPI.Cliq do
   """
   @spec delete_channel(String.t()) :: :ok | {:error, any()}
   def delete_channel(channel_id) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+    with :ok <- Validation.validate_id(channel_id),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       result =
         Request.new("cliq")
         |> Request.set_access_token(token)
@@ -361,7 +364,8 @@ defmodule ZohoAPI.Cliq do
   """
   @spec archive_channel(String.t()) :: {:ok, map()} | {:error, any()}
   def archive_channel(channel_id) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+    with :ok <- Validation.validate_id(channel_id),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
       |> Request.set_access_token(token)
       |> Request.with_version(@cliq_version)
@@ -444,9 +448,8 @@ defmodule ZohoAPI.Cliq do
   defp send_channel_members(channel_id, body) do
     # validate_id/1 before anything else: `channel_id` is interpolated straight
     # into the request path, so a value carrying `..` or `/` would reshape the
-    # URL. Most write methods in this module skip it, so this does not fix them —
-    # but both add-members entry points share this helper, which is the cheapest
-    # place to cover the pair at once.
+    # URL. Both add-members entry points share this helper, which covers the
+    # pair at once.
     with :ok <- Validation.validate_id(channel_id),
          {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
@@ -472,7 +475,8 @@ defmodule ZohoAPI.Cliq do
   """
   @spec remove_channel_members(String.t(), [String.t()]) :: {:ok, map()} | {:error, any()}
   def remove_channel_members(channel_id, user_ids) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+    with :ok <- Validation.validate_id(channel_id),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
       |> Request.set_access_token(token)
       |> Request.with_version(@cliq_version)
@@ -497,7 +501,11 @@ defmodule ZohoAPI.Cliq do
   """
   @spec update_member_role(String.t(), String.t(), String.t()) :: {:ok, map()} | {:error, any()}
   def update_member_role(channel_id, user_id, role) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+    # Both ids land in the path, so both are validated. `user_id` is the only
+    # non-channel id interpolated anywhere in this module.
+    with :ok <- Validation.validate_id(channel_id),
+         :ok <- Validation.validate_id(user_id),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
       |> Request.set_access_token(token)
       |> Request.with_version(@cliq_version)
@@ -545,7 +553,8 @@ defmodule ZohoAPI.Cliq do
     if body == %{} do
       {:error, :no_updatable_fields}
     else
-      with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+      with :ok <- Validation.validate_id(channel_id),
+           {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
         Request.new("cliq")
         |> Request.set_access_token(token)
         |> Request.with_version(@cliq_version)
@@ -581,7 +590,8 @@ defmodule ZohoAPI.Cliq do
   """
   @spec unarchive_channel(String.t()) :: {:ok, map()} | {:error, any()}
   def unarchive_channel(channel_id) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+    with :ok <- Validation.validate_id(channel_id),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
       |> Request.set_access_token(token)
       |> Request.with_version(@cliq_version)

@@ -365,18 +365,27 @@ defmodule ZohoAPI.CliqTest do
       test "rejects #{label} on every function that interpolates channel_id" do
         bad = unquote(bad_id)
 
-        assert {:error, _} = Cliq.get_channel(bad)
-        assert {:error, _} = Cliq.list_channel_members(bad)
-        assert {:error, _} = Cliq.delete_channel(bad)
-        assert {:error, _} = Cliq.archive_channel(bad)
-        assert {:error, _} = Cliq.unarchive_channel(bad)
-        assert {:error, _} = Cliq.remove_channel_members(bad, ["u1"])
-        assert {:error, _} = Cliq.update_member_role(bad, "u1", "member")
+        checks = [
+          {"get_channel/1", fn -> Cliq.get_channel(bad) end},
+          {"list_channel_members/1", fn -> Cliq.list_channel_members(bad) end},
+          {"delete_channel/1", fn -> Cliq.delete_channel(bad) end},
+          {"archive_channel/1", fn -> Cliq.archive_channel(bad) end},
+          {"unarchive_channel/1", fn -> Cliq.unarchive_channel(bad) end},
+          {"remove_channel_members/2", fn -> Cliq.remove_channel_members(bad, ["u1"]) end},
+          {"update_member_role/3", fn -> Cliq.update_member_role(bad, "u1", "member") end},
+          # A non-empty attrs map is required here: update_channel/2
+          # short-circuits on :no_updatable_fields BEFORE validating the id,
+          # so an empty map would return an error for the wrong reason and
+          # assert nothing about the guard.
+          {"update_channel/2", fn -> Cliq.update_channel(bad, %{name: "x"}) end}
+        ]
 
-        # A non-empty attrs map is required: update_channel/2 short-circuits on
-        # :no_updatable_fields BEFORE validating the id, so an empty map would
-        # return an error for the wrong reason and assert nothing about the guard.
-        assert {:error, _} = Cliq.update_channel(bad, %{name: "x"})
+        for {name, call} <- checks do
+          result = call.()
+
+          assert match?({:error, _}, result),
+                 "expected #{name} to reject channel_id #{inspect(bad)}, got: #{inspect(result)}"
+        end
       end
 
       test "rejects #{label} in the user_id of update_member_role/3" do

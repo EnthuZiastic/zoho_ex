@@ -362,22 +362,73 @@ defmodule ZohoAPI.Cliq do
       {:error, :zoho_token_cache_unavailable}
   end
 
+  # Cliq caps a single add-members call at 100 entries, for both body shapes.
+  # Exceeding it is rejected by the API rather than silently truncated, so the
+  # guard below turns that into a local error instead of a wasted round trip
+  # against a 20 req/min budget.
+  @max_channel_members_per_call 100
+
   @doc """
-  Adds members to a Cliq channel.
+  Adds members to a Cliq channel by Zoho user ID.
 
   ## Parameters
     - `channel_id` - The numeric channel ID string.
-    - `user_ids` - List of Zoho user ID strings to add.
+    - `user_ids` - List of Zoho user ID strings to add. Max #{@max_channel_members_per_call}.
+
+  Use `add_channel_members_by_email/2` for people you only have an email for —
+  notably EXTERNAL collaborators, who have no Zoho user ID to look up.
   """
-  @spec add_channel_members(String.t(), [String.t()]) :: {:ok, map()} | {:error, any()}
+  @spec add_channel_members(String.t(), [String.t()]) ::
+          {:ok, map()} | {:error, any()}
   def add_channel_members(channel_id, user_ids) do
+    post_channel_members(channel_id, %{user_ids: user_ids}, user_ids)
+  end
+
+  @doc """
+  Adds members to a Cliq channel by EMAIL address.
+
+  Same endpoint as `add_channel_members/2` — only the body key differs
+  (`email_ids` rather than `user_ids`); Cliq documents the request body as
+  accepting exactly one of the two.
+
+  This is the only way to add someone you cannot resolve to a Zoho user ID.
+  External collaborators are the motivating case: Cliq's `/users` directory does
+  not list them, so there is no id to look up, and a caller holding only an email
+  would otherwise be stuck.
+
+  A SEPARATE function rather than a shape-sniffing clause on
+  `add_channel_members/2`: both take a list of strings, so a runtime guess
+  between "these are ids" and "these are emails" would have to key on something
+  like the presence of `@`. That heuristic fails silently and in the worst
+  direction — it would post an id list under `email_ids`, which Cliq accepts as
+  a well-formed request that matches nobody.
+
+  ## Parameters
+    - `channel_id` - The numeric channel ID string.
+    - `email_ids` - List of email address strings. Max #{@max_channel_members_per_call}.
+  """
+  @spec add_channel_members_by_email(String.t(), [String.t()]) ::
+          {:ok, map()} | {:error, any()}
+  def add_channel_members_by_email(channel_id, email_ids) do
+    post_channel_members(channel_id, %{email_ids: email_ids}, email_ids)
+  end
+
+  # Shared transport for both body shapes. `entries` is the same list the body
+  # carries, passed separately only so the cap check does not have to know which
+  # key was used.
+  defp post_channel_members(_channel_id, _body, entries)
+       when length(entries) > @max_channel_members_per_call do
+    {:error, {:too_many_members, length(entries), @max_channel_members_per_call}}
+  end
+
+  defp post_channel_members(channel_id, body, _entries) do
     with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
       |> Request.set_access_token(token)
       |> Request.with_version(@cliq_version)
       |> Request.with_method(:post)
       |> Request.with_path("channels/#{channel_id}/members")
-      |> Request.with_body(%{user_ids: user_ids})
+      |> Request.with_body(body)
       |> Request.send()
     end
   catch

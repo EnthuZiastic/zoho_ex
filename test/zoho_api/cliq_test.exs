@@ -243,6 +243,71 @@ defmodule ZohoAPI.CliqTest do
 
       assert {:ok, %{"added" => true}} = Cliq.add_channel_members(channel_id, user_ids)
     end
+
+    test "rejects more than 100 entries without calling the API" do
+      # Cliq rejects an over-cap call anyway; catching it locally avoids burning
+      # one of 20 requests/min. The mock has no `expect`, so ANY request fails
+      # the test — that absence is the assertion.
+      assert {:error, {:too_many_members, 101, 100}} =
+               Cliq.add_channel_members("987000000654321", Enum.map(1..101, &"u#{&1}"))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # add_channel_members_by_email/2
+  # ---------------------------------------------------------------------------
+
+  describe "add_channel_members_by_email/2" do
+    test "sends POST to /channels/:id/members with email_ids body key" do
+      channel_id = "987000000654321"
+      email_ids = ["outside@vendor.example", "other@partner.example"]
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :post, url, body, _headers, _opts ->
+        assert url =~ "channels/#{channel_id}/members"
+
+        decoded = Jason.decode!(body)
+        assert decoded["email_ids"] == email_ids
+        # The whole point of the separate function: an email list must never go
+        # out under user_ids, which Cliq would accept as a request matching nobody.
+        refute Map.has_key?(decoded, "user_ids")
+
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: Jason.encode!(%{"added" => true})
+         }}
+      end)
+
+      assert {:ok, %{"added" => true}} =
+               Cliq.add_channel_members_by_email(channel_id, email_ids)
+    end
+
+    test "hits the same endpoint as add_channel_members/2" do
+      # Guards against a future refactor moving one of the two to a different
+      # path — they are one Cliq endpoint with two accepted body shapes.
+      channel_id = "987000000654321"
+      test_pid = self()
+
+      expect(ZohoAPI.HTTPClientMock, :request, 2, fn :post, url, body, _headers, _opts ->
+        send(test_pid, {:called, url, Jason.decode!(body) |> Map.keys()})
+        {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"added" => true})}}
+      end)
+
+      Cliq.add_channel_members(channel_id, ["u1"])
+      Cliq.add_channel_members_by_email(channel_id, ["a@b.example"])
+
+      assert_receive {:called, by_id_url, ["user_ids"]}
+      assert_receive {:called, by_email_url, ["email_ids"]}
+      assert by_id_url == by_email_url
+    end
+
+    test "rejects more than 100 entries without calling the API" do
+      assert {:error, {:too_many_members, 101, 100}} =
+               Cliq.add_channel_members_by_email(
+                 "987000000654321",
+                 Enum.map(1..101, &"user#{&1}@vendor.example")
+               )
+    end
   end
 
   # ---------------------------------------------------------------------------

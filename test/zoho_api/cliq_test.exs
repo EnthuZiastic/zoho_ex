@@ -289,6 +289,10 @@ defmodule ZohoAPI.CliqTest do
       test_pid = self()
 
       expect(ZohoAPI.HTTPClientMock, :request, 2, fn :post, url, body, _headers, _opts ->
+        # Map.keys/1 order is unspecified, which would matter if a body ever
+        # carried more than one key. Each of these carries exactly one (Cliq
+        # accepts user_ids XOR email_ids), so the list is always single-element
+        # and the ordering question never arises.
         send(test_pid, {:called, url, Jason.decode!(body) |> Map.keys()})
         {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"added" => true})}}
       end)
@@ -307,6 +311,38 @@ defmodule ZohoAPI.CliqTest do
                  "987000000654321",
                  Enum.map(1..101, &"user#{&1}@vendor.example")
                )
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # channel_id validation (shared by both add-members entry points)
+  # ---------------------------------------------------------------------------
+
+  describe "add-members channel_id validation" do
+    # channel_id is interpolated straight into the request path, so these must be
+    # rejected BEFORE any request is built. No `expect` on the mock in any of
+    # these tests, so an escaping call fails the test rather than passing quietly.
+    for {label, bad_id} <- [
+          {"path traversal", "../../admin"},
+          {"path separator", "123/members"},
+          {"backslash", "123\\members"},
+          {"empty", ""}
+        ] do
+      test "rejects #{label} for add_channel_members/2" do
+        assert {:error, _} = Cliq.add_channel_members(unquote(bad_id), ["u1"])
+      end
+
+      test "rejects #{label} for add_channel_members_by_email/2" do
+        assert {:error, _} = Cliq.add_channel_members_by_email(unquote(bad_id), ["a@b.example"])
+      end
+    end
+
+    test "the cap is checked before the id, so an over-cap call cannot leak a bad path" do
+      # Ordering is observable: both guards reject, but only one error names the
+      # reason. Pinning it keeps a future refactor from reporting :too_many_members
+      # for a malformed id or vice versa.
+      assert {:error, {:too_many_members, 101, 100}} =
+               Cliq.add_channel_members("../../admin", Enum.map(1..101, &"u#{&1}"))
     end
   end
 

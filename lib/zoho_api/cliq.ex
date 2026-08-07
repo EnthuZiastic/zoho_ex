@@ -368,6 +368,19 @@ defmodule ZohoAPI.Cliq do
   # against a 20 req/min budget.
   @max_channel_members_per_call 100
 
+  @typedoc """
+  Result of the two add-members calls.
+
+  `{:too_many_members, got, max}` is named explicitly rather than folded into
+  `any()` so a caller pattern-matching on it gets Dialyzer's help — the whole
+  point of returning a structured error instead of a string. The trailing
+  `any()` still covers transport and Cliq-side failures, which this module does
+  not enumerate.
+  """
+  @type add_members_result ::
+          {:ok, map()}
+          | {:error, {:too_many_members, non_neg_integer(), non_neg_integer()} | any()}
+
   @doc """
   Adds members to a Cliq channel by Zoho user ID.
 
@@ -378,8 +391,7 @@ defmodule ZohoAPI.Cliq do
   Use `add_channel_members_by_email/2` for people you only have an email for —
   notably EXTERNAL collaborators, who have no Zoho user ID to look up.
   """
-  @spec add_channel_members(String.t(), [String.t()]) ::
-          {:ok, map()} | {:error, any()}
+  @spec add_channel_members(String.t(), [String.t()]) :: add_members_result()
   def add_channel_members(channel_id, user_ids) do
     post_channel_members(channel_id, %{user_ids: user_ids}, user_ids)
   end
@@ -407,8 +419,7 @@ defmodule ZohoAPI.Cliq do
     - `channel_id` - The numeric channel ID string.
     - `email_ids` - List of email address strings. Max #{@max_channel_members_per_call}.
   """
-  @spec add_channel_members_by_email(String.t(), [String.t()]) ::
-          {:ok, map()} | {:error, any()}
+  @spec add_channel_members_by_email(String.t(), [String.t()]) :: add_members_result()
   def add_channel_members_by_email(channel_id, email_ids) do
     post_channel_members(channel_id, %{email_ids: email_ids}, email_ids)
   end
@@ -416,13 +427,28 @@ defmodule ZohoAPI.Cliq do
   # Shared transport for both body shapes. `entries` is the same list the body
   # carries, passed separately only so the cap check does not have to know which
   # key was used.
-  defp post_channel_members(_channel_id, _body, entries)
-       when length(entries) > @max_channel_members_per_call do
-    {:error, {:too_many_members, length(entries), @max_channel_members_per_call}}
+  #
+  # `length/1` is called ONCE and reused in the error. A guard cannot bind, so the
+  # earlier `when length(entries) > @max` head had to call it a second time in the
+  # body — bounded (the cap is 100) but pointless.
+  defp post_channel_members(channel_id, body, entries) do
+    count = length(entries)
+
+    if count > @max_channel_members_per_call do
+      {:error, {:too_many_members, count, @max_channel_members_per_call}}
+    else
+      send_channel_members(channel_id, body)
+    end
   end
 
-  defp post_channel_members(channel_id, body, _entries) do
-    with {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+  defp send_channel_members(channel_id, body) do
+    # validate_id/1 before anything else: `channel_id` is interpolated straight
+    # into the request path, so a value carrying `..` or `/` would reshape the
+    # URL. Most write methods in this module skip it, so this does not fix them —
+    # but both add-members entry points share this helper, which is the cheapest
+    # place to cover the pair at once.
+    with :ok <- Validation.validate_id(channel_id),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")
       |> Request.set_access_token(token)
       |> Request.with_version(@cliq_version)

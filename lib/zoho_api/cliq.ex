@@ -17,6 +17,19 @@ defmodule ZohoAPI.Cliq do
   alias ZohoAPI.TokenCache
   alias ZohoAPI.Validation
 
+  @typedoc """
+  Result of the two add-members calls.
+
+  `{:too_many_members, got, max}` is named explicitly rather than folded into
+  `any()` so a caller pattern-matching on it gets Dialyzer's help — the whole
+  point of returning a structured error instead of a string. The trailing
+  `any()` still covers transport and Cliq-side failures, which this module does
+  not enumerate.
+  """
+  @type add_members_result ::
+          {:ok, map()}
+          | {:error, {:too_many_members, non_neg_integer(), non_neg_integer()} | any()}
+
   @cliq_version "v2"
 
   # Note: This module builds a Request directly rather than going through
@@ -367,19 +380,6 @@ defmodule ZohoAPI.Cliq do
   # guard below turns that into a local error instead of a wasted round trip
   # against a 20 req/min budget.
   @max_channel_members_per_call 100
-
-  @typedoc """
-  Result of the two add-members calls.
-
-  `{:too_many_members, got, max}` is named explicitly rather than folded into
-  `any()` so a caller pattern-matching on it gets Dialyzer's help — the whole
-  point of returning a structured error instead of a string. The trailing
-  `any()` still covers transport and Cliq-side failures, which this module does
-  not enumerate.
-  """
-  @type add_members_result ::
-          {:ok, map()}
-          | {:error, {:too_many_members, non_neg_integer(), non_neg_integer()} | any()}
 
   @doc """
   Adds members to a Cliq channel by Zoho user ID.

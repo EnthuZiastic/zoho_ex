@@ -77,6 +77,50 @@ defmodule ZohoAPI.Cliq do
     end
   end
 
+  @doc """
+  Posts a direct message to a single user via Cliq's `buddies` endpoint.
+
+  ## Parameters
+    - `message` - The message text.
+    - `email_or_zuid` - The recipient's email address OR their Cliq user ID
+      (ZUID). Both address the same operation
+      (`POST buddies/{EMAIL_ID}/message` and `POST buddies/{ZUID}/message`
+      are documented as equivalent) — pass whichever you have.
+
+  Uses the SAME OAuth-self-client credentials as `create_message/2` — no bot
+  identity, no separate credential type. The sender, as the recipient sees
+  it, is whichever real Zoho account backs the existing `:cliq` config's
+  refresh token.
+
+  Per Zoho's own docs (https://www.zoho.com/cliq/help/restapi/v2/messages/):
+  *"This API will be not applicable if the intended user is neither a mutual
+  contact nor your organization member."* A target outside both categories
+  gets rejected by Cliq itself, not by anything in this function.
+
+  `email_or_zuid` is validated with `Validation.validate_path_segment/1`
+  rather than `validate_id/1` — an email address's `@` and `.` would fail
+  `validate_id/1`'s alphanumeric-only regex, but the value is still
+  interpolated directly into the request path, so path-injection characters
+  are still rejected.
+  """
+  @spec post_message_to_user(String.t(), String.t()) :: {:ok, map()} | {:error, any()}
+  def post_message_to_user(email_or_zuid, message) do
+    with :ok <- Validation.validate_path_segment(email_or_zuid),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+      Request.new("cliq")
+      |> Request.set_access_token(token)
+      |> Request.with_version(@cliq_version)
+      |> Request.with_method(:post)
+      |> Request.with_path("buddies/#{email_or_zuid}/message")
+      |> Request.with_body(%{text: message})
+      |> Request.send()
+    end
+  catch
+    :exit, {:noproc, {GenServer, :call, [ZohoAPI.TokenCache | _]}} ->
+      Logger.warning("[ZohoAPI.Cliq] TokenCache unavailable — skipping")
+      {:error, :zoho_token_cache_unavailable}
+  end
+
   # ---------------------------------------------------------------------------
   # Channel read methods
   # ---------------------------------------------------------------------------

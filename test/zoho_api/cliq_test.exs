@@ -471,6 +471,54 @@ defmodule ZohoAPI.CliqTest do
   end
 
   # ---------------------------------------------------------------------------
+  # post_message_to_user/2
+  # ---------------------------------------------------------------------------
+
+  describe "post_message_to_user/2" do
+    test "sends POST to /buddies/:email/message with the message text, addressed by email" do
+      email = "person@example.com"
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :post, url, body, _headers, _opts ->
+        assert url =~ "buddies/#{email}/message"
+
+        decoded = Jason.decode!(body)
+        assert decoded["text"] == "Hello!"
+
+        {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"message" => "sent"})}}
+      end)
+
+      assert {:ok, %{"message" => "sent"}} = Cliq.post_message_to_user(email, "Hello!")
+    end
+
+    test "addresses the same endpoint by ZUID" do
+      zuid = "987000000654321"
+
+      expect(ZohoAPI.HTTPClientMock, :request, fn :post, url, _body, _headers, _opts ->
+        assert url =~ "buddies/#{zuid}/message"
+        {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"message" => "sent"})}}
+      end)
+
+      assert {:ok, _} = Cliq.post_message_to_user(zuid, "Hello!")
+    end
+
+    test "rejects a path-traversal payload without making a request" do
+      assert {:error, _} = Cliq.post_message_to_user("../admin", "Hello!")
+    end
+
+    test "surfaces an error response" do
+      expect(ZohoAPI.HTTPClientMock, :request, fn :post, _url, _body, _headers, _opts ->
+        {:ok,
+         %Req.Response{
+           status: 400,
+           body: Jason.encode!(%{"code" => "INVALID_REQUEST", "message" => "not applicable"})
+         }}
+      end)
+
+      assert {:error, _} = Cliq.post_message_to_user("nobody@example.com", "Hello!")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # archive_channel/1
   # ---------------------------------------------------------------------------
 

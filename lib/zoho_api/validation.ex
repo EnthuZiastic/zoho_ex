@@ -61,11 +61,14 @@ defmodule ZohoAPI.Validation do
   delimiters `?`/`#`, which would let a crafted value redirect the request to
   an unintended path or smuggle query params).
 
-  After the specific checks below, the value must match an allowlist: word
-  characters, `.`, `+` and `-`, optionally followed by `@` and a domain of
-  word characters, `.` and `-`. That rejects percent-encoded sequences such
-  as `%2e%2e`, `%2F` or `%3F`, which contain none of the denylisted
-  characters but could be decoded into them downstream.
+  After the specific checks below, the value must match an allowlist: it
+  starts with a word character (so a lone `.` or a leading dot cannot form a
+  dot-segment), continues with word characters or any of `. + - ' ! $ & * = ~`
+  (the RFC 3986 unreserved/sub-delim characters that are also legal in an
+  email local part, e.g. `o'brien@example.com`), and may end with `@` and a
+  domain of word characters, `.` and `-`. That rejects percent-encoded
+  sequences such as `%2e%2e`, `%2F` or `%3F`, which contain none of the
+  denylisted characters but could be decoded into them downstream.
 
   ## Examples
 
@@ -99,7 +102,7 @@ defmodule ZohoAPI.Validation do
       Regex.match?(~r/\s/, value) ->
         {:error, "Invalid value: whitespace not allowed"}
 
-      not Regex.match?(~r/\A[\w.+\-]+(?:@[\w.\-]+)?\z/u, value) ->
+      not Regex.match?(~r/\A\w[\w.+\-'!$&*=~]*(?:@[\w.\-]+)?\z/u, value) ->
         {:error, "Invalid value: unsupported characters"}
 
       true ->

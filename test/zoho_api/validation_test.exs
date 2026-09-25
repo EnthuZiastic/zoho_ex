@@ -97,6 +97,19 @@ defmodule ZohoAPI.ValidationTest do
       end
     end
 
+    test "accepts email local-part characters that are legal in a path segment" do
+      assert :ok = Validation.validate_path_segment("o'brien@example.com")
+      assert :ok = Validation.validate_path_segment("a&b=c@example.com")
+      assert :ok = Validation.validate_path_segment("first-last_1@sub-domain.example.co.in")
+    end
+
+    test "rejects a lone dot or a leading dot (dot-segment)" do
+      for value <- [".", ".hidden@example.com", "-a@example.com"] do
+        assert {:error, "Invalid value: unsupported characters"} =
+                 Validation.validate_path_segment(value)
+      end
+    end
+
     test "rejects characters outside the email/ID allowlist" do
       for value <- ["a;b@example.com", "a@b@c.com", "a,b@example.com", "@example.com", "person@"] do
         assert {:error, "Invalid value: unsupported characters"} =

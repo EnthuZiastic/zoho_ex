@@ -90,6 +90,20 @@ defmodule ZohoAPI.ValidationTest do
                Validation.validate_path_segment("person @example.com")
     end
 
+    test "rejects percent-encoded sequences that the denylist checks miss" do
+      for value <- ["%2e%2e", "%2F", "%3F", "%23", "person@example.com%2Fx"] do
+        assert {:error, "Invalid value: unsupported characters"} =
+                 Validation.validate_path_segment(value)
+      end
+    end
+
+    test "rejects characters outside the email/ID allowlist" do
+      for value <- ["a;b@example.com", "a@b@c.com", "a,b@example.com", "@example.com", "person@"] do
+        assert {:error, "Invalid value: unsupported characters"} =
+                 Validation.validate_path_segment(value)
+      end
+    end
+
     test "rejects empty values" do
       assert {:error, "value cannot be empty"} = Validation.validate_path_segment("")
       assert {:error, "value cannot be empty"} = Validation.validate_path_segment("   ")

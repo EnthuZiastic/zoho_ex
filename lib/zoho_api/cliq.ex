@@ -100,11 +100,15 @@ defmodule ZohoAPI.Cliq do
   `email_or_zuid` is validated with `Validation.validate_path_segment/1`
   rather than `validate_id/1` — an email address's `@` and `.` would fail
   `validate_id/1`'s alphanumeric-only regex, but the value is still
-  interpolated directly into the request path, so path-injection characters
-  are still rejected.
+  interpolated directly into the request path, so anything outside an
+  email/ID-shaped value (including percent-encoded sequences) is rejected.
+
+  Argument order matches `create_message/2` (message first, target second).
+  Both are plain strings, so a transposed call is not caught by the type
+  checker or by dialyzer.
   """
   @spec post_message_to_user(String.t(), String.t()) :: {:ok, map()} | {:error, any()}
-  def post_message_to_user(email_or_zuid, message) do
+  def post_message_to_user(message, email_or_zuid) do
     with :ok <- Validation.validate_path_segment(email_or_zuid),
          {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
       Request.new("cliq")

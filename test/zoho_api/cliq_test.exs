@@ -487,7 +487,7 @@ defmodule ZohoAPI.CliqTest do
         {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"message" => "sent"})}}
       end)
 
-      assert {:ok, %{"message" => "sent"}} = Cliq.post_message_to_user(email, "Hello!")
+      assert {:ok, %{"message" => "sent"}} = Cliq.post_message_to_user("Hello!", email)
     end
 
     test "addresses the same endpoint by ZUID" do
@@ -498,11 +498,18 @@ defmodule ZohoAPI.CliqTest do
         {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"message" => "sent"})}}
       end)
 
-      assert {:ok, _} = Cliq.post_message_to_user(zuid, "Hello!")
+      assert {:ok, _} = Cliq.post_message_to_user("Hello!", zuid)
     end
 
     test "rejects a path-traversal payload without making a request" do
-      assert {:error, _} = Cliq.post_message_to_user("../admin", "Hello!")
+      assert {:error, _} = Cliq.post_message_to_user("Hello!", "../admin")
+    end
+
+    test "rejects percent-encoded traversal and delimiters without making a request" do
+      for value <- ["%2e%2e", "%2F", "person@example.com%3Fx=1"] do
+        assert {:error, "Invalid value: unsupported characters"} =
+                 Cliq.post_message_to_user("Hello!", value)
+      end
     end
 
     test "surfaces an error response" do
@@ -514,7 +521,7 @@ defmodule ZohoAPI.CliqTest do
          }}
       end)
 
-      assert {:error, _} = Cliq.post_message_to_user("nobody@example.com", "Hello!")
+      assert {:error, _} = Cliq.post_message_to_user("Hello!", "nobody@example.com")
     end
   end
 

@@ -56,12 +56,16 @@ defmodule ZohoAPI.Validation do
   address rather than a bare alphanumeric ID.
 
   `validate_id/1`'s `^[\\w\\-]+$` regex rejects the `@` and `.` an email
-  address needs, so it cannot guard a path built from one. This validates the
+  address needs, so it cannot guard a path built from one. This guards the
   same path-injection risk (traversal, separators, and the query/fragment
   delimiters `?`/`#`, which would let a crafted value redirect the request to
-  an unintended path or smuggle query params) without constraining the
-  charset otherwise — any non-empty, whitespace-free value with no path or
-  URL-structural characters passes.
+  an unintended path or smuggle query params).
+
+  After the specific checks below, the value must match an allowlist: word
+  characters, `.`, `+` and `-`, optionally followed by `@` and a domain of
+  word characters, `.` and `-`. That rejects percent-encoded sequences such
+  as `%2e%2e`, `%2F` or `%3F`, which contain none of the denylisted
+  characters but could be decoded into them downstream.
 
   ## Examples
 
@@ -86,14 +90,17 @@ defmodule ZohoAPI.Validation do
       String.contains?(value, "..") ->
         {:error, "Invalid value: path traversal not allowed"}
 
-      String.contains?(value, "/") or String.contains?(value, "\\") ->
+      String.contains?(value, ["/", "\\"]) ->
         {:error, "Invalid value: path separators not allowed"}
 
-      String.contains?(value, "?") or String.contains?(value, "#") ->
+      String.contains?(value, ["?", "#"]) ->
         {:error, "Invalid value: query/fragment separators not allowed"}
 
       Regex.match?(~r/\s/, value) ->
         {:error, "Invalid value: whitespace not allowed"}
+
+      not Regex.match?(~r/\A[\w.+\-]+(?:@[\w.\-]+)?\z/u, value) ->
+        {:error, "Invalid value: unsupported characters"}
 
       true ->
         :ok

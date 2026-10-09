@@ -125,6 +125,72 @@ defmodule ZohoAPI.Cliq do
       {:error, :zoho_token_cache_unavailable}
   end
 
+  @doc """
+  Posts a message to one or more users via a named Cliq **Bot** identity, rather than
+  the self-client's own OAuth-authorized account (`post_message_to_user/2`,
+  `create_message/2`).
+
+  ## Parameters
+    - `message` - The message text.
+    - `userids` - A single email/ZUID string, or a list of them. Zoho's own body
+      shape is one comma-separated string; a list is joined with `,` here for the
+      caller's convenience.
+
+  Per Zoho's Bot platform docs (`post-to-bot.html`): `POST
+  /bots/{BOT_UNIQUE_NAME}/message`, same `ZohoCliq.Webhooks.CREATE` scope as every
+  other messaging call in this module — no separate OAuth grant needed.
+
+  `BOT_UNIQUE_NAME` is read from the EXISTING `:zoho_api, :cliq` config block
+  (`config :zoho_api, :cliq, bot_unique_name: ...`, alongside `client_id`/
+  `client_secret`/`refresh_token`) — not passed by the caller, so every call site
+  stays in sync with whichever bot identity is actually configured. Missing/blank
+  config returns `{:error, :bot_unique_name_not_configured}` before any round trip,
+  rather than building `bots//message` and letting Cliq reject it opaquely.
+  """
+  @spec post_message_to_bot(String.t(), String.t() | [String.t()]) ::
+          {:ok, map()} | {:error, any()}
+  def post_message_to_bot(message, userids) do
+    with {:ok, bot_unique_name} <- fetch_bot_unique_name(),
+         :ok <- Validation.validate_id(bot_unique_name),
+         :ok <- validate_userids(userids),
+         {:ok, token} <- TokenCache.get_or_refresh(:cliq) do
+      Request.new("cliq")
+      |> Request.set_access_token(token)
+      |> Request.with_version(@cliq_version)
+      |> Request.with_method(:post)
+      |> Request.with_path("bots/#{bot_unique_name}/message")
+      |> Request.with_body(%{text: message, userids: join_userids(userids)})
+      |> Request.send()
+    end
+  catch
+    :exit, {:noproc, {GenServer, :call, [ZohoAPI.TokenCache | _]}} ->
+      Logger.warning("[ZohoAPI.Cliq] TokenCache unavailable — skipping")
+      {:error, :zoho_token_cache_unavailable}
+  end
+
+  defp fetch_bot_unique_name do
+    case Application.get_env(:zoho_api, :cliq, [])[:bot_unique_name] do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _ -> {:error, :bot_unique_name_not_configured}
+    end
+  end
+
+  # `userids` lands in the request BODY, not the path — unlike `bot_unique_name`
+  # above, it never needs `validate_id/1`'s slug-only check (an email's `@`/`.`
+  # would fail it, same reasoning as `post_message_to_user/2`'s own
+  # `validate_path_segment/1`). Only an empty send is worth rejecting locally.
+  defp validate_userids([]), do: {:error, :empty_userids}
+  defp validate_userids(userids) when is_list(userids), do: :ok
+
+  defp validate_userids(userids) when is_binary(userids) do
+    if String.trim(userids) == "", do: {:error, :empty_userids}, else: :ok
+  end
+
+  defp validate_userids(_), do: {:error, "userids must be a string or a list of strings"}
+
+  defp join_userids(userids) when is_list(userids), do: Enum.join(userids, ",")
+  defp join_userids(userids) when is_binary(userids), do: userids
+
   # ---------------------------------------------------------------------------
   # Channel read methods
   # ---------------------------------------------------------------------------

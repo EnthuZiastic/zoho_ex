@@ -526,6 +526,88 @@ defmodule ZohoAPI.CliqTest do
   end
 
   # ---------------------------------------------------------------------------
+  # post_message_to_bot/2
+  # ---------------------------------------------------------------------------
+
+  describe "post_message_to_bot/2" do
+    setup do
+      prev = Application.get_env(:zoho_api, :cliq, [])
+      Application.put_env(:zoho_api, :cliq, Keyword.put(prev, :bot_unique_name, "adminbot"))
+      on_exit(fn -> Application.put_env(:zoho_api, :cliq, prev) end)
+      :ok
+    end
+
+    test "sends POST to /bots/:bot_unique_name/message with text and a single userid" do
+      expect(ZohoAPI.HTTPClientMock, :request, fn :post, url, body, _headers, _opts ->
+        assert url =~ "bots/adminbot/message"
+
+        decoded = Jason.decode!(body)
+        assert decoded["text"] == "Hello!"
+        assert decoded["userids"] == "person@example.com"
+
+        {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"message" => "sent"})}}
+      end)
+
+      assert {:ok, %{"message" => "sent"}} =
+               Cliq.post_message_to_bot("Hello!", "person@example.com")
+    end
+
+    test "joins a list of userids with a comma" do
+      expect(ZohoAPI.HTTPClientMock, :request, fn :post, _url, body, _headers, _opts ->
+        decoded = Jason.decode!(body)
+        assert decoded["userids"] == "a@example.com,b@example.com"
+
+        {:ok, %Req.Response{status: 200, body: Jason.encode!(%{"message" => "sent"})}}
+      end)
+
+      assert {:ok, _} =
+               Cliq.post_message_to_bot("Hello!", ["a@example.com", "b@example.com"])
+    end
+
+    test "rejects an empty userids list without making a request" do
+      assert {:error, :empty_userids} = Cliq.post_message_to_bot("Hello!", [])
+    end
+
+    test "rejects a blank userids string without making a request" do
+      assert {:error, :empty_userids} = Cliq.post_message_to_bot("Hello!", "   ")
+    end
+
+    test "returns :bot_unique_name_not_configured and makes no request when unset" do
+      Application.put_env(
+        :zoho_api,
+        :cliq,
+        Keyword.delete(Application.get_env(:zoho_api, :cliq), :bot_unique_name)
+      )
+
+      assert {:error, :bot_unique_name_not_configured} =
+               Cliq.post_message_to_bot("Hello!", "person@example.com")
+    end
+
+    test "returns :bot_unique_name_not_configured for a blank configured value" do
+      Application.put_env(
+        :zoho_api,
+        :cliq,
+        Keyword.put(Application.get_env(:zoho_api, :cliq), :bot_unique_name, "")
+      )
+
+      assert {:error, :bot_unique_name_not_configured} =
+               Cliq.post_message_to_bot("Hello!", "person@example.com")
+    end
+
+    test "surfaces an error response" do
+      expect(ZohoAPI.HTTPClientMock, :request, fn :post, _url, _body, _headers, _opts ->
+        {:ok,
+         %Req.Response{
+           status: 400,
+           body: Jason.encode!(%{"code" => "INVALID_REQUEST", "message" => "not applicable"})
+         }}
+      end)
+
+      assert {:error, _} = Cliq.post_message_to_bot("Hello!", "nobody@example.com")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # archive_channel/1
   # ---------------------------------------------------------------------------
 
